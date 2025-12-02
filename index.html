@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Teachable Machine 影像分類器 (彈性 URL)</title>
+    
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@latest/dist/teachablemachine-image.min.js"></script>
+    
+    <style>
+        /* 網頁基本樣式 */
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            padding: 20px;
+        }
+        #webcam-container {
+            margin: 20px auto;
+            border: 1px solid #ccc;
+            display: inline-block;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        }
+        .controls, button {
+            margin-bottom: 20px;
+        }
+        input[type="text"] {
+            width: 80%;
+            padding: 10px;
+            margin-right: 10px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 5px;
+        }
+        #label-container div {
+            padding: 5px 0;
+            font-size: 1.1em;
+            color: #333;
+        }
+        .status {
+            color: orange;
+            margin-bottom: 10px;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Teachable Machine 影像分類演示</h1>
+    
+    <div class="controls">
+        <p class="status">請貼上您的 Teachable Machine 模型 URL，然後點擊按鈕：</p>
+        <input type="text" id="modelUrlInput" placeholder="在此貼上您的模型連結，例如: https://teachablemachine.withgoogle.com/models/xxxxxx/">
+        <button type="button" onclick="init()">載入模型並啟動</button>
+    </div>
+    
+    <div id="webcam-container"></div>
+    
+    <div id="label-container"></div>
+
+    <script type="text/javascript">
+        let model, webcam, labelContainer, maxPredictions;
+        let isRunning = false;
+        
+        // 1. 初始化函數：從輸入框獲取 URL，載入模型並設定網路攝影機
+        async function init() {
+            if(isRunning) return; // 防止重複點擊
+            isRunning = true;
+
+            const urlInput = document.getElementById("modelUrlInput").value.trim();
+            labelContainer = document.getElementById("label-container");
+            labelContainer.innerHTML = '<h4>正在載入中...請稍候</h4>';
+
+            if (!urlInput || !urlInput.startsWith('http')) {
+                labelContainer.innerHTML = '<h4>錯誤：請輸入有效的模型 URL！</h4>';
+                isRunning = false;
+                return;
+            }
+
+            // 確保 URL 以斜線結尾，符合模型檔案路徑結構
+            const MODEL_URL = urlInput.endsWith('/') ? urlInput : urlInput + '/';
+
+            try {
+                // 載入模型 (model.json 和 metadata.json)
+                console.log(`正在載入模型: ${MODEL_URL}`);
+                const modelURL = MODEL_URL + "model.json";
+                const metadataURL = MODEL_URL + "metadata.json";
+                
+                model = await tmImage.load(modelURL, metadataURL);
+                maxPredictions = model.getTotalClasses();
+
+                // 清理舊的攝影機實例 (如果存在)
+                if (webcam) {
+                    webcam.stop();
+                    document.getElementById("webcam-container").innerHTML = '';
+                }
+
+                // 啟動網路攝影機
+                console.log("正在啟動網路攝影機...");
+                const flip = true; 
+                webcam = new tmImage.Webcam(200, 200, flip); 
+                await webcam.setup(); // 要求使用者權限
+                await webcam.play();
+                
+                // 將網路攝影機畫面插入到網頁中
+                document.getElementById("webcam-container").appendChild(webcam.canvas);
+                
+                // 設定標籤顯示容器
+                labelContainer.innerHTML = '<h4>模型載入完成，攝影機已啟動。</h4>';
+                labelContainer.innerHTML += '<div>&nbsp;</div>'; // 留一個空行
+                
+                // 根據模型類別數量建立結果顯示區塊
+                for (let i = 0; i < maxPredictions; i++) {
+                    labelContainer.appendChild(document.createElement("div"));
+                }
+                
+                // 開始循環預測
+                window.requestAnimationFrame(loop);
+
+            } catch (error) {
+                console.error("初始化失敗:", error);
+                labelContainer.innerHTML = `<h4>初始化失敗，請檢查 URL 或攝影機權限！</h4><p style="color:red;">錯誤訊息: ${error.message}</p>`;
+                isRunning = false;
+            }
+        }
+
+        // 2. 循環預測函數
+        async function loop() {
+            if (!isRunning) return;
+            webcam.update(); // 更新網路攝影機畫面
+            await predict(); // 進行分類預測
+            window.requestAnimationFrame(loop); // 繼續下一幀循環
+        }
+
+        // 3. 預測分類函數
+        async function predict() {
+            if (!model || !webcam) return;
+            
+            // 透過網路攝影機畫面進行分類
+            const prediction = await model.predict(webcam.canvas);
+
+            // 顯示結果
+            for (let i = 0; i < maxPredictions; i++) {
+                const probability = prediction[i].probability.toFixed(2);
+                const classPrediction =
+                    `**${prediction[i].className}**: ${probability}`;
+                
+                // 簡單的視覺化：用百分比寬度的 div 條顯示機率
+                const barWidth = Math.min(100, probability * 100);
+                labelContainer.childNodes[i+2].innerHTML = `
+                    <div style="display: flex; align-items: center; justify-content: center; margin-bottom: 5px;">
+                        <span style="width: 150px; text-align: right; padding-right: 10px;">${prediction[i].className}</span>
+                        <div style="height: 15px; width: 200px; background-color: #eee; border-radius: 5px;">
+                            <div style="height: 100%; width: ${barWidth}%; background-color: #28a745; border-radius: 5px;"></div>
+                        </div>
+                        <span style="width: 50px; text-align: left; padding-left: 5px;">${(probability * 100).toFixed(0)}%</span>
+                    </div>
+                `;
+            }
+        }
+    </script>
+
+</body>
+</html>
